@@ -43,6 +43,7 @@ pub struct BotInstance {
     running: Arc<AtomicBool>,
 
     last_heal_time: Arc<RwLock<Instant>>,
+    last_login_claim_time: Arc<RwLock<Instant>>,
     last_claim_time: Arc<RwLock<Instant>>,
     last_travel_time: Arc<RwLock<Instant>>,
     last_ball_buy_time: Arc<RwLock<Instant>>,
@@ -103,6 +104,7 @@ impl BotInstance {
             paused: Arc::new(AtomicBool::new(false)),
             running: Arc::new(AtomicBool::new(false)),
             last_heal_time: Arc::new(RwLock::new(past)),
+            last_login_claim_time: Arc::new(RwLock::new(past)),
             last_claim_time: Arc::new(RwLock::new(past)),
             last_travel_time: Arc::new(RwLock::new(past)),
             last_ball_buy_time: Arc::new(RwLock::new(past)),
@@ -669,10 +671,17 @@ impl BotInstance {
         // 5. Coleta de diários (com jitter orgânico e pacing humano anti-burst)
         if self.config.settings.auto_daily {
             let last_claim = *self.last_claim_time.read().await;
-            let claim_interval = self.stealth.jitter_delay(Duration::from_secs(45));
+            let last_login = *self.last_login_claim_time.read().await;
+            let login_interval = self.stealth.jitter_delay(Duration::from_secs(3600));
+            if last_login.elapsed() > login_interval {
+                *self.last_login_claim_time.write().await = Instant::now();
+                let _ = self.socket.send_intent(serde_json::json!({ "type": "claimDailyLogin" })).await;
+                self.stealth.pacing_step().await;
+            }
+
+            let claim_interval = self.stealth.jitter_delay(Duration::from_secs(900));
             if last_claim.elapsed() > claim_interval {
                 *self.last_claim_time.write().await = Instant::now();
-                let _ = self.socket.send_intent(serde_json::json!({ "type": "claimDailyLogin" })).await;
                 self.stealth.pacing_step().await;
                 let _ = self.socket.send_intent(serde_json::json!({ "type": "claimQuestReward" })).await;
                 self.stealth.pacing_step().await;
@@ -845,9 +854,13 @@ impl BotInstance {
     pub async fn claim_rewards_now(&self) -> Result<(), String> {
         if self.socket.is_connected() {
             let _ = self.socket.send_intent(serde_json::json!({ "type": "claimDailyLogin" })).await;
+            self.stealth.pacing_step().await;
             let _ = self.socket.send_intent(serde_json::json!({ "type": "claimQuestReward" })).await;
+            self.stealth.pacing_step().await;
             let _ = self.socket.send_intent(serde_json::json!({ "type": "claimBestiaryAll" })).await;
+            self.stealth.pacing_step().await;
             let _ = self.socket.send_intent(serde_json::json!({ "type": "claimDailyTasks" })).await;
+            self.stealth.pacing_step().await;
             let _ = self.socket.send_intent(serde_json::json!({ "type": "claimWeeklyTasks" })).await;
         }
         Ok(())
@@ -895,6 +908,7 @@ impl BotInstance {
             paused: self.paused.clone(),
             running: self.running.clone(),
             last_heal_time: self.last_heal_time.clone(),
+            last_login_claim_time: self.last_login_claim_time.clone(),
             last_claim_time: self.last_claim_time.clone(),
             last_travel_time: self.last_travel_time.clone(),
             last_ball_buy_time: self.last_ball_buy_time.clone(),
