@@ -18,6 +18,7 @@ sha2 = "0.10"
 hmac = "0.12"
 uuid = { version = "1", features = ["v4", "fast-rng"] }
 hex = "0.4"
+rand = "0.8"
 tokio-tungstenite = { version = "0.24", features = ["rustls-tls-native-roots"] }
 url = "2"
 axum = "0.7"
